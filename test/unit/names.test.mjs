@@ -8,7 +8,7 @@ import {
   swiftIdentifier,
   swiftStringLiteral,
   swiftTypeName
-} from "../../template/src/names.js";
+} from "../../src/codegen/names.js";
 
 test("language identifiers escape keywords consistently", () => {
   assert.equal(swiftIdentifier("class"), "class_");

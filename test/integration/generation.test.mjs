@@ -270,7 +270,7 @@ Future<void> main() async {
 `;
 }
 
-test("npm package contains the executable and runtime sources without generated template artifacts", async () => {
+test("npm package contains the executable and direct emitter sources", async () => {
   await inTemporaryDirectory("asyncapi-pack-", async root => {
     const npmCLI = process.env.npm_execpath;
     assert.ok(npmCLI, "npm_execpath is required for package acceptance");
@@ -287,13 +287,23 @@ test("npm package contains the executable and runtime sources without generated 
       "asyncapi-generator.schema.json",
       "src/cli.mjs",
       "src/generator.mjs",
-      "template/src/ir.js",
-      "template/template/index.js"
+      "src/codegen/ir.js",
+      "src/codegen/emit-dart.js",
+      "src/codegen/emit-swift.js"
     ]) {
       assert.ok(files.has(path), `package is missing ${path}`);
     }
     assert.equal([...files.keys()].some(path => path.includes("__transpiled")), false);
   });
+});
+
+test("published runtime dependencies stay parser-only", async () => {
+  const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
+  const lock = await readFile(join(packageRoot, "package-lock.json"), "utf8");
+  assert.deepEqual(manifest.dependencies, { "@asyncapi/parser": "3.6.1" });
+  assert.equal(lock.includes("@asyncapi/generator-react-sdk"), false);
+  assert.equal(lock.includes('"node_modules/react"'), false);
+  assert.equal(lock.includes('"node_modules/rollup"'), false);
 });
 
 test("package bin generates and checks multiple config-relative targets without a workspace wrapper", async () => {
@@ -325,7 +335,7 @@ test("package bin generates and checks multiple config-relative targets without 
   });
 });
 
-test("official Generator output is deterministic, multi-file aware, and isolated under concurrency", async () => {
+test("direct emitter output is deterministic, multi-file aware, and isolated under concurrency", async () => {
   await inTemporaryDirectory("asyncapi-determinism-", async root => {
     const first = join(root, "first");
     const second = join(root, "second");
