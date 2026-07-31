@@ -1,6 +1,6 @@
 {
   "name": "@soenan/asyncapi-generator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deterministic AsyncAPI 3.1 Swift and Dart generator",
   "license": "Apache-2.0",
   "author": "Soenan LLC",
@@ -31,17 +31,11 @@
     "NOTICE",
     "asyncapi-generator.schema.json",
     "bin",
-    "src",
-    "template/package.json",
-    "template/src",
-    "template/template"
+    "src"
   ],
   "publishConfig": {
     "access": "public"
   },
-  "workspaces": [
-    "template"
-  ],
   "scripts": {
     "test": "mise x node@24.11.1 -- node --test --test-reporter=spec test/unit/*.test.mjs test/integration/*.test.mjs",
     "test:unit": "mise x node@24.11.1 -- node --test --test-reporter=spec test/unit/*.test.mjs",
@@ -52,11 +46,9 @@
     "node": ">=24.11.1 <25"
   },
   "dependencies": {
-    "@asyncapi/generator": "3.3.0",
     "@asyncapi/parser": "3.6.1"
   },
   "overrides": {
-    "@babel/core": "7.29.7",
     "brace-expansion": "5.0.9",
     "jsonpath-plus": "10.4.0",
     "minimatch": "10.2.6"

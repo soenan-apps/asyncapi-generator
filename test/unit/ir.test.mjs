@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
-import { buildIR } from "../../template/src/ir.js";
+import { buildIR } from "../../src/codegen/ir.js";
 import { duplexDocument, parseFile, parseObject } from "../support/parse.mjs";
 
 const realtimeChatFixture = resolve("test/fixtures/realtime-chat/asyncapi.yaml");

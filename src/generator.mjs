@@ -1,39 +1,22 @@
 import { constants as fsConstants } from "node:fs";
-import { createRequire } from "node:module";
 import {
   access,
-  cp,
   mkdir,
-  mkdtemp,
   readFile,
-  readdir,
   rename,
-  rm,
   rmdir,
   stat,
-  symlink,
   unlink,
   writeFile
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, dirname, join, resolve, sep } from "node:path";
+import { Parser, fromFile } from "@asyncapi/parser";
+import { emitDart } from "./codegen/emit-dart.js";
+import { emitSwift } from "./codegen/emit-swift.js";
+import { buildIR } from "./codegen/ir.js";
+import { snakeCase } from "./codegen/names.js";
 
 const MANIFEST_FILE = ".asyncapi-generator.json";
-const TEMPLATE_DIRECTORY = fileURLToPath(new URL("../template", import.meta.url));
-const require = createRequire(import.meta.url);
-
-function templateNodeModulesDirectory() {
-  let current = dirname(require.resolve("@asyncapi/generator-react-sdk/package.json", {
-    paths: [dirname(require.resolve("@asyncapi/generator/package.json"))]
-  }));
-  while (basename(current) !== "node_modules") {
-    const parent = dirname(current);
-    if (parent === current) throw new Error("Cannot locate the AsyncAPI template dependency directory");
-    current = parent;
-  }
-  return current;
-}
 
 export class GeneratedOutputMismatchError extends Error {
   constructor(differences) {
@@ -63,64 +46,45 @@ function assertRelativeGeneratedPath(path) {
   }
 }
 
-async function collectFiles(root, directory = root) {
-  const result = new Map();
-  const entries = await readdir(directory, { withFileTypes: true });
-  entries.sort((left, right) => left.name.localeCompare(right.name));
-  for (const entry of entries) {
-    const absolute = join(directory, entry.name);
-    if (entry.isSymbolicLink()) {
-      throw new Error(`Generator template produced a symbolic link: ${relative(root, absolute)}`);
-    }
-    if (entry.isDirectory()) {
-      for (const [path, contents] of await collectFiles(root, absolute)) result.set(path, contents);
-    } else if (entry.isFile()) {
-      const path = relative(root, absolute).split(sep).join("/");
-      assertRelativeGeneratedPath(path);
-      result.set(path, await readFile(absolute));
-    }
-  }
-  return result;
+function parserDiagnosticPath(diagnostic) {
+  return diagnostic.path?.join("/") ?? "$";
 }
 
-async function stage(options) {
-  assertSupportedNodeVersion();
-  const temporary = await mkdtemp(join(tmpdir(), "asyncapi-generator-"));
-  const isolatedTemplate = join(temporary, "template");
-  const output = join(temporary, "output");
-  try {
-    await cp(TEMPLATE_DIRECTORY, isolatedTemplate, {
-      recursive: true,
-      filter(source) {
-        const path = relative(TEMPLATE_DIRECTORY, source).split(sep).join("/");
-        return path !== "__transpiled" && !path.startsWith("__transpiled/") && path !== "node_modules";
-      }
-    });
-    await symlink(templateNodeModulesDirectory(), join(isolatedTemplate, "node_modules"), "dir");
-    if (options.language === "swift") {
-      await mkdir(join(output, "Sources", options.moduleName), { recursive: true });
-    } else {
-      await mkdir(join(output, "lib", "src"), { recursive: true });
-    }
-    const generatorModule = await import("@asyncapi/generator");
-    const imported = generatorModule.default ?? generatorModule;
-    const Generator = imported.Generator ?? imported.default ?? imported;
-    const generator = new Generator(isolatedTemplate, output, {
-      forceWrite: true,
-      install: false,
-      templateParams: {
-        language: options.language,
-        moduleName: options.moduleName
-      }
-    });
-    await generator.generateFromFile(options.input);
-    const files = await collectFiles(output);
-    if (files.size === 0) throw new Error("Template invariant failed: no source files were generated");
-    files.set(MANIFEST_FILE, manifestBytes(options, files.keys()));
-    return files;
-  } finally {
-    await rm(temporary, { recursive: true, force: true });
+async function parseInput(input) {
+  const result = await fromFile(new Parser(), input).parse();
+  if (result.diagnostics.length > 0) {
+    const diagnostics = [...result.diagnostics].sort((left, right) =>
+      parserDiagnosticPath(left).localeCompare(parserDiagnosticPath(right))
+        || left.message.localeCompare(right.message)
+    );
+    const details = diagnostics
+      .map(diagnostic => `${parserDiagnosticPath(diagnostic)}: ${diagnostic.message}`)
+      .join("\n");
+    throw new Error(`AsyncAPI parser rejected ${input}:\n${details}`);
   }
+  if (!result.document) throw new Error(`AsyncAPI parser produced no document for ${input}`);
+  return result.document;
+}
+
+function stage(document, options) {
+  const ir = buildIR(document, { moduleName: options.moduleName });
+  const files = new Map();
+  if (options.language === "swift") {
+    files.set(
+      `Sources/${ir.moduleName}/AsyncAPIGenerated.swift`,
+      Buffer.from(`${emitSwift(ir)}\n`, "utf8")
+    );
+  } else {
+    const libraryName = snakeCase(ir.moduleName);
+    files.set("lib/src/asyncapi_generated.dart", Buffer.from(`${emitDart(ir)}\n`, "utf8"));
+    files.set(
+      `lib/${libraryName}.dart`,
+      Buffer.from("// Generated by @soenan/asyncapi-generator. Do not edit.\nexport 'src/asyncapi_generated.dart';\n\n", "utf8")
+    );
+  }
+  for (const path of files.keys()) assertRelativeGeneratedPath(path);
+  files.set(MANIFEST_FILE, manifestBytes(options, files.keys()));
+  return files;
 }
 
 async function readPreviousManifest(output) {
@@ -302,11 +266,13 @@ function resultFor(config, stagedTargets) {
 }
 
 async function stageConfig(config) {
+  assertSupportedNodeVersion();
   await assertInputFile(config.input);
-  return Promise.all(config.targets.map(async target => ({
+  const document = await parseInput(config.input);
+  return config.targets.map(target => ({
     target,
-    files: await stage({ input: config.input, ...target })
-  })));
+    files: stage(document, target)
+  }));
 }
 
 export async function generate(configPath) {

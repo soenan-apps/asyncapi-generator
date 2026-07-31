@@ -53,7 +53,7 @@ const INT32_MAXIMUM = 2_147_483_647;
 class IRBuilder {
   constructor(asyncapi, moduleName) {
     if (!asyncapi || typeof asyncapi.channels !== "function" || typeof asyncapi.operations !== "function") {
-      throw new TypeError("The template requires an official AsyncAPI Parser v3 document.");
+      throw new TypeError("The generator requires an official AsyncAPI Parser v3 document.");
     }
     this.asyncapi = asyncapi;
     this.rawDocument = asyncapi.json();

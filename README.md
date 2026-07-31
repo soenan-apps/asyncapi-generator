@@ -218,9 +218,9 @@ npm pack --dry-run
 
 The tests cover config and diagnostic behavior, concurrent deterministic
 generation, package contents, Dart analysis and execution, and compilation of
-generated Swift against `AsyncAPIRuntime`. Template sources live under
-`template/src/`; `template/__transpiled/` is generated scratch output and must
-not be edited or published.
+generated Swift against `AsyncAPIRuntime`. The generator uses the official
+AsyncAPI parser and writes the validated intermediate model through its direct
+Swift and Dart emitters; it does not install or execute a template runtime.
 
 Changes should include the smallest fixture that demonstrates the contract
 boundary. New AsyncAPI features must either be represented completely in both

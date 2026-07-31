@@ -3,7 +3,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { assertSupportedNodeVersion, validateConfig } from "../../src/generator.mjs";
 
-test("Node support is explicit and stops before loading the upstream generator", () => {
+test("Node support is explicit and checked before parsing input", () => {
   assert.doesNotThrow(() => assertSupportedNodeVersion("24.11.1"));
   assert.throws(() => assertSupportedNodeVersion("24.3.0"), /requires Node\.js >=24\.11\.1 <25/);
   assert.throws(() => assertSupportedNodeVersion("25.0.0"), /requires Node\.js >=24\.11\.1 <25/);
