@@ -1,0 +1,106 @@
+postMessagePayload:
+  type: object
+  additionalProperties: false
+  required: [type, roomId, text, retryCount, encrypted, clientNote]
+  properties:
+    type:
+      type: string
+      const: chat.message.post
+    roomId:
+      type: string
+      minLength: 1
+      maxLength: 64
+    text:
+      type: string
+      minLength: 1
+      maxLength: 128
+      pattern: ^[^\s].*
+    retryCount:
+      type: integer
+      minimum: 0
+      maximum: 3
+    encrypted:
+      type: boolean
+    clientNote:
+      type: [string, 'null']
+      maxLength: 20
+    priority:
+      type: string
+      enum: [low, high]
+    labels:
+      type: array
+      minItems: 1
+      maxItems: 4
+      items:
+        type: string
+        minLength: 1
+    metadata:
+      type: object
+      additionalProperties:
+        type: string
+setTypingPayload:
+  type: object
+  additionalProperties: false
+  required: [type, roomId, typing]
+  properties:
+    type:
+      type: string
+      const: chat.typing.set
+    roomId:
+      type: string
+      minLength: 1
+    typing:
+      type: boolean
+messagePostedPayload:
+  type: object
+  additionalProperties: false
+  required: [type, roomId, messageId, text, sequence]
+  properties:
+    type:
+      type: string
+      const: chat.message.posted
+    roomId:
+      type: string
+      minLength: 1
+    messageId:
+      type: string
+      minLength: 1
+    text:
+      type: string
+      minLength: 1
+      maxLength: 128
+    sequence:
+      type: integer
+      format: int64
+      minimum: 0
+      maximum: 9007199254740991
+typingUpdatedPayload:
+  type: object
+  additionalProperties: false
+  required: [type, roomId, participantId, typing]
+  properties:
+    type:
+      type: string
+      const: chat.typing.updated
+    roomId:
+      type: string
+      minLength: 1
+    participantId:
+      type: string
+      minLength: 1
+    typing:
+      type: boolean
+messageRejectedPayload:
+  type: object
+  additionalProperties: false
+  required: [type, roomId, reason]
+  properties:
+    type:
+      type: string
+      const: chat.message.rejected
+    roomId:
+      type: string
+      minLength: 1
+    reason:
+      type: string
+      enum: [permissionDenied, rateLimited, malformed]

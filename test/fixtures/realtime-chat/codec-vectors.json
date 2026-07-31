@@ -1,0 +1,57 @@
+[
+  {
+    "name": "valid",
+    "valid": true,
+    "json": {"type":"chat.message.post","roomId":"room-1","text":"Hello","retryCount":0,"encrypted":true,"clientNote":null,"priority":"high","labels":["chat"],"metadata":{"trace":"abc"}}
+  },
+  {
+    "name": "unknown property",
+    "valid": false,
+    "json": {"type":"chat.message.post","roomId":"room-1","text":"Hello","retryCount":0,"encrypted":true,"clientNote":null,"unknown":1}
+  },
+  {
+    "name": "required null",
+    "valid": false,
+    "json": {"type":"chat.message.post","roomId":null,"text":"Hello","retryCount":0,"encrypted":true,"clientNote":null}
+  },
+  {
+    "name": "integer below minimum",
+    "valid": false,
+    "json": {"type":"chat.message.post","roomId":"room-1","text":"Hello","retryCount":-1,"encrypted":true,"clientNote":null}
+  },
+  {
+    "name": "pattern mismatch",
+    "valid": false,
+    "json": {"type":"chat.message.post","roomId":"room-1","text":" leading","retryCount":0,"encrypted":true,"clientNote":null}
+  },
+  {
+    "name": "const mismatch",
+    "valid": false,
+    "json": {"type":"chat.other","roomId":"room-1","text":"Hello","retryCount":0,"encrypted":true,"clientNote":null}
+  },
+  {
+    "name": "unknown enum",
+    "valid": false,
+    "json": {"type":"chat.message.post","roomId":"room-1","text":"Hello","retryCount":0,"encrypted":true,"clientNote":null,"priority":"urgent"}
+  },
+  {
+    "name": "boolean is not integer",
+    "valid": false,
+    "json": {"type":"chat.message.post","roomId":"room-1","text":"Hello","retryCount":true,"encrypted":true,"clientNote":null}
+  },
+  {
+    "name": "integer is not boolean",
+    "valid": false,
+    "json": {"type":"chat.message.post","roomId":"room-1","text":"Hello","retryCount":0,"encrypted":1,"clientNote":null}
+  },
+  {
+    "name": "required nullable missing",
+    "valid": false,
+    "json": {"type":"chat.message.post","roomId":"room-1","text":"Hello","retryCount":0,"encrypted":true}
+  },
+  {
+    "name": "optional non-null explicit null",
+    "valid": false,
+    "json": {"type":"chat.message.post","roomId":"room-1","text":"Hello","retryCount":0,"encrypted":true,"clientNote":null,"priority":null}
+  }
+]
