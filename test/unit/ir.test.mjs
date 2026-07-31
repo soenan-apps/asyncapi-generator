@@ -27,13 +27,19 @@ test("official parser models resolve operation to channel to external message pa
   assert.deepEqual(ir.closeSignals.map(value => value.code), [4401, 4404]);
 });
 
-test("root close extension rejects legacy locations and invalid wire values", async () => {
-  const legacy = duplexDocument({ extension: { "x-close-signals": { expired: { code: 4401, reason: "expired" } } } });
-  assert.deepEqual((await diagnosticsFor(legacy)).map(value => value.code), ["close-signals.legacy-location"]);
+test("root close extension rejects component placement and invalid wire values", async () => {
+  const misplaced = duplexDocument({
+    extension: {
+      components: {
+        "x-websocket-close-signals": { expired: { code: 4401, reason: "expired" } }
+      }
+    }
+  });
+  assert.deepEqual((await diagnosticsFor(misplaced)).map(value => value.code), ["close-signals.location"]);
 
   const invalid = duplexDocument({
     extension: {
-      "x-soenan-websocket-close-signals": {
+      "x-websocket-close-signals": {
         reserved: { code: 1005, reason: "x".repeat(124) }
       }
     }
@@ -42,7 +48,7 @@ test("root close extension rejects legacy locations and invalid wire values", as
 
   const strict = duplexDocument({
     extension: {
-      "x-soenan-websocket-close-signals": {
+      "x-websocket-close-signals": {
         "class": { code: 4400, reason: "first", retryable: true },
         "class_": { code: 4401, reason: "second" }
       }

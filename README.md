@@ -143,7 +143,7 @@ The current generator supports:
   bounded integers, numbers, booleans, and nullable types.
 - `int32` as Swift `Int32` and bounded `int64` as Swift `Int64`.
 - WebSocket close signals declared with the
-  `x-soenan-websocket-close-signals` root extension.
+  `x-websocket-close-signals` root extension.
 
 Channel literal segments use ASCII URI-unreserved characters only. Empty,
 `.`, `..`, percent-encoded, Unicode, colon, and backslash segments are rejected.

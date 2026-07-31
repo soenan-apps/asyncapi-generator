@@ -24,7 +24,7 @@
     ".": "./src/index.mjs"
   },
   "bin": {
-    "asyncapi-soenan-generator": "./bin/asyncapi-soenan-generator.mjs"
+    "asyncapi-soenan-generator": "bin/asyncapi-soenan-generator.mjs"
   },
   "files": [
     "LICENSE",
