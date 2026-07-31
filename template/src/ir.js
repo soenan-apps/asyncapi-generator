@@ -1,8 +1,7 @@
 import { GeneratorDiagnostic, UnsupportedAsyncAPIFeaturesError } from "./diagnostics.js";
 import { camelCase, dartIdentifier, dartTypeName, pascalCase, swiftIdentifier, swiftTypeName } from "./names.js";
 
-const CLOSE_SIGNAL_EXTENSION = "x-soenan-websocket-close-signals";
-const LEGACY_CLOSE_SIGNAL_EXTENSIONS = ["x-close-signals", "x-websocket-close-signals"];
+const CLOSE_SIGNAL_EXTENSION = "x-websocket-close-signals";
 const COMPOSITION_ACCESSORS = ["allOf", "anyOf", "oneOf", "not", "if", "then", "else"];
 const UNSUPPORTED_VALIDATION_KEYWORDS = [
   "contains", "contentEncoding", "contentMediaType", "contentSchema",
@@ -514,11 +513,6 @@ class IRBuilder {
   }
 
   buildCloseSignals() {
-    for (const key of LEGACY_CLOSE_SIGNAL_EXTENSIONS) {
-      if (this.rawDocument[key] !== undefined || this.rawDocument.components?.[key] !== undefined) {
-        this.diagnostic("close-signals.legacy-location", this.rawDocument[key] !== undefined ? `$.${key}` : `$.components.${key}`, `use the root ${CLOSE_SIGNAL_EXTENSION} extension`);
-      }
-    }
     if (this.rawDocument.components?.[CLOSE_SIGNAL_EXTENSION] !== undefined) {
       this.diagnostic("close-signals.location", `$.components.${CLOSE_SIGNAL_EXTENSION}`, `move ${CLOSE_SIGNAL_EXTENSION} to the document root`);
     }
