@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { check, generate, GeneratedOutputMismatchError } from "../../src/generator.mjs";
+import {
+  assertStoredTrace,
+  codecVectors as patternCodecVectors,
+  derivePatternOperations,
+  loadPatternCorpus
+} from "../support/pattern-corpus.mjs";
 
 const fixture = resolve("test/fixtures/realtime-chat/asyncapi.yaml");
 const keywordFixture = resolve("test/fixtures/keyword-json/asyncapi.json");
@@ -47,6 +54,20 @@ function runSwift(arguments_, packageRoot) {
   });
 }
 
+function assertPatternCompilationMetric(source, language, expectedPatterns) {
+  const registryPattern = language === "swift"
+    ? /static let p\d+ = _AsyncAPIPattern\(/g
+    : /static final p\d+ = _AsyncApiPattern\(/g;
+  assert.equal(source.match(registryPattern)?.length ?? 0, expectedPatterns);
+  if (language === "swift") {
+    assert.equal(source.match(/NSRegularExpression\(pattern: source\)/g)?.length ?? 0, 1);
+    assert.equal(source.includes("range(of: pattern, options: .regularExpression)"), false);
+  } else {
+    assert.equal(source.match(/RegExp\(source, unicode: true\)/g)?.length ?? 0, 1);
+    assert.equal(source.includes("RegExp(pattern).hasMatch"), false);
+  }
+}
+
 async function configFor(root, input, targets) {
   const path = join(root, `.asyncapi-generator-${configSequence += 1}.json`);
   await writeFile(path, `${JSON.stringify({ input, targets }, null, 2)}\n`, "utf8");
@@ -56,6 +77,147 @@ async function configFor(root, input, targets) {
 async function runConfigured(operation, root, input, targets) {
   return operation(await configFor(root, input, targets));
 }
+
+test("generation rejects remote references before the parser can make a network request", async () => {
+  await inTemporaryDirectory("asyncapi-remote-ref-", async root => {
+    let requests = 0;
+    const server = createServer((_request, response) => {
+      requests += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ type: "object" }));
+    });
+    await new Promise((resolvePromise, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolvePromise);
+    });
+
+    try {
+      const address = server.address();
+      assert.equal(typeof address, "object");
+      const input = join(root, "asyncapi.json");
+      await writeFile(input, `${JSON.stringify({
+        asyncapi: "3.1.0",
+        info: { title: "Remote ref probe", version: "1.0.0" },
+        channels: {},
+        operations: {},
+        components: {
+          schemas: {
+            Unsafe: { $ref: `http://127.0.0.1:${address.port}/schema.json` }
+          }
+        }
+      })}\n`, "utf8");
+
+      await assert.rejects(
+        runConfigured(generate, root, input, [{
+          language: "swift",
+          moduleName: "RemoteRefProbe",
+          output: join(root, "generated")
+        }]),
+        error => error.name === "UnsupportedAsyncAPIFeaturesError"
+          && error.diagnostics[0]?.code === "reference.remote"
+      );
+      assert.equal(requests, 0);
+
+      const nested = join(root, "nested-schema.yaml");
+      await writeFile(nested, `$ref: http://127.0.0.1:${address.port}/schema.json\n`, "utf8");
+      await writeFile(input, `${JSON.stringify({
+        asyncapi: "3.1.0",
+        info: { title: "Nested remote ref probe", version: "1.0.0" },
+        channels: {},
+        operations: {},
+        components: {
+          schemas: {
+            Unsafe: { $ref: "./nested-schema.yaml" }
+          }
+        }
+      })}\n`, "utf8");
+      await assert.rejects(
+        runConfigured(generate, root, input, [{
+          language: "swift",
+          moduleName: "NestedRemoteRefProbe",
+          output: join(root, "generated-nested")
+        }]),
+        error => error.name === "UnsupportedAsyncAPIFeaturesError"
+          && error.diagnostics[0]?.code === "reference.remote"
+      );
+      assert.equal(requests, 0);
+    } finally {
+      await new Promise((resolvePromise, reject) => server.close(error => {
+        if (error) reject(error);
+        else resolvePromise();
+      }));
+    }
+  });
+});
+
+test("local references cannot escape the contract root through a symlink", async () => {
+  await inTemporaryDirectory("asyncapi-local-ref-root-", async root => {
+    const contractRoot = join(root, "contract");
+    await mkdir(contractRoot);
+    const outside = join(root, "outside.yaml");
+    await writeFile(outside, "Outside:\n  type: object\n", "utf8");
+    await symlink(outside, join(contractRoot, "outside-link.yaml"));
+    const input = join(contractRoot, "asyncapi.yaml");
+    await writeFile(input, `asyncapi: 3.1.0
+info:
+  title: Escaping local ref probe
+  version: 1.0.0
+channels: {}
+operations: {}
+components:
+  schemas:
+    Unsafe:
+      $ref: ./outside-link.yaml#/Outside
+`, "utf8");
+
+    await assert.rejects(
+      runConfigured(generate, root, input, [{
+        language: "swift",
+        moduleName: "EscapingLocalRefProbe",
+        output: join(root, "generated")
+      }]),
+      error => error.name === "UnsupportedAsyncAPIFeaturesError"
+        && error.diagnostics[0]?.code === "reference.local.outsideRoot"
+    );
+  });
+});
+
+test("generated source metadata cannot inject Swift or Dart code through line breaks", async () => {
+  await inTemporaryDirectory("asyncapi-source-metadata-", async root => {
+    const document = JSON.parse(await readFile(keywordFixture, "utf8"));
+    document.info.title = "Trusted\npublic let injected = true\u0085\u2028\u202E";
+    document.info.version = "1.0.0\r\nvoid injected() {}\u2066";
+    const input = join(root, "asyncapi.json");
+    await writeFile(input, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+    const swiftOutput = join(root, "swift");
+    const dartOutput = join(root, "dart");
+
+    await runConfigured(generate, root, input, [
+      {
+        language: "swift",
+        moduleName: "MetadataFixtureAPI",
+        output: swiftOutput
+      },
+      {
+        language: "dart",
+        moduleName: "MetadataFixtureAPI",
+        output: dartOutput
+      }
+    ]);
+
+    const expected = String.raw`// Source: "Trusted\npublic let injected = true\u0085\u2028\u202E" "1.0.0\r\nvoid injected() {}\u2066"`;
+    for (const source of [
+      await readFile(join(swiftOutput, "Sources/MetadataFixtureAPI/AsyncAPIGenerated.swift"), "utf8"),
+      await readFile(join(dartOutput, "lib/src/asyncapi_generated.dart"), "utf8")
+    ]) {
+      const sourceLine = source.split("\n")[1];
+      assert.equal(sourceLine, expected);
+      assert.equal(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(sourceLine), false);
+      assert.equal(source.includes("\npublic let injected = true"), false);
+      assert.equal(source.includes("\nvoid injected() {}"), false);
+    }
+  });
+});
 
 async function configureSwiftPackage(output, moduleName, testSource) {
   const runtimeDependency = swiftRuntimePath
@@ -121,11 +283,14 @@ private actor PullSource {
 
 @Test func strictCodecVectorsAndTypedRegistration() throws {
   let vectors: [(String, Bool, String)] = [${swiftVectors}]
-  for (_, expected, base64) in vectors {
+  var validationOperations = 0
+  for (name, expected, base64) in vectors {
     let data = Data(base64Encoded: base64)!
     let accepted = (try? PostMessageCodec.decode(data)) != nil
-    #expect(accepted == expected)
+    #expect(accepted == expected, "\\(name)")
+    validationOperations += 1
   }
+  #expect(validationOperations == ${encoded.length})
   var invalidEncodeWasRejected = false
   do {
     _ = try PostMessageCodec.encode(PostMessage(
@@ -224,6 +389,7 @@ final class _Adapter implements AsyncApiSocketAdapter {
 
 Future<void> main() async {
   const vectors = ${JSON.stringify(encoded.map(({ name, valid, base64 }) => ({ name, valid, base64 })))};
+  var validationOperations = 0;
   for (final vector in vectors) {
     var accepted = true;
     try {
@@ -232,7 +398,9 @@ Future<void> main() async {
       accepted = false;
     }
     if (accepted != vector['valid']) throw StateError('codec vector failed: \${vector['name']}');
+    validationOperations += 1;
   }
+  if (validationOperations != ${encoded.length}) throw StateError('validation operation count changed');
   var invalidEncodeWasRejected = false;
   try {
     const PostMessageCodec().encode(const PostMessage(
@@ -288,6 +456,7 @@ test("npm package contains the executable and direct emitter sources", async () 
       "src/cli.mjs",
       "src/generator.mjs",
       "src/codegen/ir.js",
+      "src/codegen/pattern-policy.js",
       "src/codegen/emit-dart.js",
       "src/codegen/emit-swift.js"
     ]) {
@@ -297,10 +466,13 @@ test("npm package contains the executable and direct emitter sources", async () 
   });
 });
 
-test("published runtime dependencies stay parser-only", async () => {
+test("published runtime dependencies stay limited to parsing and reference preflight", async () => {
   const manifest = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   const lock = await readFile(join(packageRoot, "package-lock.json"), "utf8");
-  assert.deepEqual(manifest.dependencies, { "@asyncapi/parser": "3.6.1" });
+  assert.deepEqual(manifest.dependencies, {
+    "@asyncapi/parser": "3.6.1",
+    "@stoplight/yaml": "4.3.0"
+  });
   assert.equal(lock.includes("@asyncapi/generator-react-sdk"), false);
   assert.equal(lock.includes('"node_modules/react"'), false);
   assert.equal(lock.includes('"node_modules/rollup"'), false);
@@ -412,7 +584,16 @@ environment:
 `, "utf8");
     const bin = join(output, "bin");
     await mkdir(bin, { recursive: true });
-    const vectors = JSON.parse(await readFile(vectorsPath, "utf8"));
+    const corpus = await loadPatternCorpus();
+    const operations = derivePatternOperations(corpus);
+    assertStoredTrace(corpus, operations);
+    const vectors = [
+      ...JSON.parse(await readFile(vectorsPath, "utf8")),
+      ...patternCodecVectors(operations)
+    ];
+    assert.equal(vectors.length, corpus.metrics.codecValidationOperations);
+    const generatedSource = await readFile(join(output, "lib/src/asyncapi_generated.dart"), "utf8");
+    assertPatternCompilationMetric(generatedSource, "dart", corpus.metrics.patternCompilations);
     await writeFile(join(bin, "acceptance.dart"), dartAcceptance(vectors), "utf8");
     const dartOptions = {
       cwd: output,
@@ -466,7 +647,16 @@ test("Swift codec uses the same cross-language strict vectors", async () => {
     await runConfigured(generate, output, fixture, [
       { output, language: "swift", moduleName: "FixtureAPI" }
     ]);
-    const vectors = JSON.parse(await readFile(vectorsPath, "utf8"));
+    const corpus = await loadPatternCorpus();
+    const operations = derivePatternOperations(corpus);
+    assertStoredTrace(corpus, operations);
+    const vectors = [
+      ...JSON.parse(await readFile(vectorsPath, "utf8")),
+      ...patternCodecVectors(operations)
+    ];
+    assert.equal(vectors.length, corpus.metrics.codecValidationOperations);
+    const generatedSource = await readFile(join(output, "Sources/FixtureAPI/AsyncAPIGenerated.swift"), "utf8");
+    assertPatternCompilationMetric(generatedSource, "swift", corpus.metrics.patternCompilations);
     await configureSwiftPackage(output, "FixtureAPI", swiftVectorTests(vectors));
     runSwift(["test", "--disable-sandbox", "--package-path", output], output);
   });

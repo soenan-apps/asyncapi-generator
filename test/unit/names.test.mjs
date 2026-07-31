@@ -5,6 +5,7 @@ import {
   dartStringLiteral,
   dartTypeName,
   snakeCase,
+  sourceCommentLiteral,
   swiftIdentifier,
   swiftStringLiteral,
   swiftTypeName
@@ -24,4 +25,11 @@ test("language identifiers escape keywords consistently", () => {
 test("string literals use language-specific escaping", () => {
   assert.equal(swiftStringLiteral("a\"\\\n\u0001$"), '"a\\"\\\\\\n\\u{1}$"');
   assert.equal(dartStringLiteral("a\"\\\n\u0001$"), '"a\\"\\\\\\n\\u0001\\$"');
+});
+
+test("source metadata is a quoted single-line representation without control or format characters", () => {
+  assert.equal(
+    sourceCommentLiteral("safe\n\u0085\u2028\u2029\u202E\u{E0001}"),
+    '"safe\\n\\u0085\\u2028\\u2029\\u202E\\uDB40\\uDC01"'
+  );
 });

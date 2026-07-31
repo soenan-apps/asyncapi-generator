@@ -1,6 +1,6 @@
 {
   "name": "@soenan/asyncapi-generator",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Deterministic AsyncAPI 3.1 Swift and Dart generator",
   "license": "Apache-2.0",
   "author": "Soenan LLC",
@@ -46,7 +46,8 @@
     "node": ">=24.11.1 <25"
   },
   "dependencies": {
-    "@asyncapi/parser": "3.6.1"
+    "@asyncapi/parser": "3.6.1",
+    "@stoplight/yaml": "4.3.0"
   },
   "overrides": {
     "brace-expansion": "5.0.9",

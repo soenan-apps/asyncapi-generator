@@ -1,4 +1,9 @@
-import { swiftIdentifier, swiftStringLiteral, swiftTypeName } from "./names.js";
+import {
+  sourceCommentLiteral,
+  swiftIdentifier,
+  swiftStringLiteral,
+  swiftTypeName
+} from "./names.js";
 
 const joinLines = items => items.filter(value => value !== undefined && value !== "").join("\n");
 const literal = value => value === undefined ? "nil" : String(value);
@@ -86,14 +91,14 @@ function emitObject(schema) {
   ]);
 }
 
-function schemaExpression(schema) {
+function schemaExpression(schema, patternNames) {
   let kind;
   switch (schema.kind) {
     case "object":
-      kind = `.object(properties: [${schema.properties.map(property => `${quoted(property.wireName)}: _AsyncAPIField(required: ${property.required}, schema: ${schemaExpression(property.schema)})`).join(", ")}], additionalProperties: ${schema.additionalProperties})`;
+      kind = `.object(properties: [${schema.properties.map(property => `${quoted(property.wireName)}: _AsyncAPIField(required: ${property.required}, schema: ${schemaExpression(property.schema, patternNames)})`).join(", ")}], additionalProperties: ${schema.additionalProperties})`;
       break;
-    case "array": kind = `.array(items: ${schemaExpression(schema.items)})`; break;
-    case "map": kind = `.map(values: ${schemaExpression(schema.values)})`; break;
+    case "array": kind = `.array(items: ${schemaExpression(schema.items, patternNames)})`; break;
+    case "map": kind = `.map(values: ${schemaExpression(schema.values, patternNames)})`; break;
     case "enum": kind = `.string(allowed: [${schema.values.map(quoted).join(", ")}])`; break;
     case "string": kind = ".string(allowed: nil)"; break;
     case "integer": kind = ".integer"; break;
@@ -101,12 +106,31 @@ function schemaExpression(schema) {
     case "boolean": kind = ".boolean"; break;
     default: throw new TypeError(`unknown schema kind ${schema.kind}`);
   }
-  return `_AsyncAPISchema(kind: ${kind}, nullable: ${schema.nullable}, minimum: ${literal(schema.minimum)}, maximum: ${literal(schema.maximum)}, exclusiveMinimum: ${literal(schema.exclusiveMinimum)}, exclusiveMaximum: ${literal(schema.exclusiveMaximum)}, minLength: ${literal(schema.minLength)}, maxLength: ${literal(schema.maxLength)}, pattern: ${schema.pattern === undefined ? "nil" : quoted(schema.pattern)}, minItems: ${literal(schema.minItems)}, maxItems: ${literal(schema.maxItems)})`;
+  return `_AsyncAPISchema(kind: ${kind}, nullable: ${schema.nullable}, minimum: ${literal(schema.minimum)}, maximum: ${literal(schema.maximum)}, exclusiveMinimum: ${literal(schema.exclusiveMinimum)}, exclusiveMaximum: ${literal(schema.exclusiveMaximum)}, minLength: ${literal(schema.minLength)}, maxLength: ${literal(schema.maxLength)}, pattern: ${schema.pattern === undefined ? "nil" : `_AsyncAPIPatternRegistry.${patternNames.get(schema.pattern)}`}, minItems: ${literal(schema.minItems)}, maxItems: ${literal(schema.maxItems)})`;
 }
 
-function emitStrictRuntime() {
+function emitStrictRuntime(patterns) {
   return `private enum _AsyncAPICodecError: Error {
   case invalid(path: String, reason: String)
+}
+
+private struct _AsyncAPIPattern: @unchecked Sendable {
+  private let expression: NSRegularExpression
+
+  init(_ source: String) {
+    self.expression = try! NSRegularExpression(pattern: source)
+  }
+
+  func matches(_ value: String) -> Bool {
+    expression.firstMatch(
+      in: value,
+      range: NSRange(value.startIndex..<value.endIndex, in: value)
+    ) != nil
+  }
+}
+
+private enum _AsyncAPIPatternRegistry {
+${patterns.map((pattern, index) => `  static let p${index} = _AsyncAPIPattern(${quoted(pattern)})`).join("\n")}
 }
 
 private struct _AsyncAPIField: Sendable {
@@ -133,7 +157,7 @@ private struct _AsyncAPISchema: Sendable {
   let exclusiveMaximum: Double?
   let minLength: Int?
   let maxLength: Int?
-  let pattern: String?
+  let pattern: _AsyncAPIPattern?
   let minItems: Int?
   let maxItems: Int?
 
@@ -146,7 +170,7 @@ private struct _AsyncAPISchema: Sendable {
     exclusiveMaximum: Double? = nil,
     minLength: Int? = nil,
     maxLength: Int? = nil,
-    pattern: String? = nil,
+    pattern: _AsyncAPIPattern? = nil,
     minItems: Int? = nil,
     maxItems: Int? = nil
   ) {
@@ -207,7 +231,8 @@ private enum _AsyncAPIStrictJSON {
       let length = string.unicodeScalars.count
       if let minimum = schema.minLength, length < minimum { throw _AsyncAPICodecError.invalid(path: path, reason: "string is shorter than minLength") }
       if let maximum = schema.maxLength, length > maximum { throw _AsyncAPICodecError.invalid(path: path, reason: "string is longer than maxLength") }
-      if let pattern = schema.pattern, string.range(of: pattern, options: .regularExpression) == nil { throw _AsyncAPICodecError.invalid(path: path, reason: "string does not match pattern") }
+      if schema.pattern != nil, length > 4_096 { throw _AsyncAPICodecError.invalid(path: path, reason: "string exceeds pattern input budget") }
+      if let pattern = schema.pattern, !pattern.matches(string) { throw _AsyncAPICodecError.invalid(path: path, reason: "string does not match pattern") }
       if let allowed, !allowed.contains(string) { throw _AsyncAPICodecError.invalid(path: path, reason: "unknown enum or const value") }
     case .integer:
       guard let number = value as? NSNumber,
@@ -238,10 +263,10 @@ private enum _AsyncAPIStrictJSON {
 }`;
 }
 
-function emitMessageCodec(message) {
+function emitMessageCodec(message, patternNames) {
   const messageType = swiftTypeName(message.typeName);
   return `public enum ${messageType}Codec {
-  private static let schema = ${schemaExpression(message.schema)}
+  private static let schema = ${schemaExpression(message.schema, patternNames)}
 
   public static func decode(_ data: Data) throws -> ${messageType} {
     try _AsyncAPIStrictJSON.validate(_AsyncAPIStrictJSON.value(from: data), schema: schema)
@@ -399,19 +424,20 @@ ${ir.channels.map(channel => `    try transport.register(channel: ${moduleType}C
 
 export function emitSwift(ir) {
   const schemas = ir.schemas.map(schema => schema.kind === "enum" ? emitEnum(schema) : emitObject(schema));
+  const patternNames = new Map(ir.patterns.map((pattern, index) => [pattern, `p${index}`]));
   return `${joinLines([
     "// Generated by @soenan/asyncapi-generator. Do not edit.",
-    `// Source: ${ir.title} ${ir.version}`,
+    `// Source: ${sourceCommentLiteral(ir.title)} ${sourceCommentLiteral(ir.version)}`,
     "",
     "import AsyncAPIRuntime",
     "import CoreFoundation",
     "import Foundation",
     "",
-    emitStrictRuntime(),
+    emitStrictRuntime(ir.patterns),
     "",
     ...schemas.flatMap((value, index) => index ? ["", value] : [value]),
     "",
-    ...ir.messages.map(emitMessageCodec).flatMap((value, index) => index ? ["", value] : [value]),
+    ...ir.messages.map(message => emitMessageCodec(message, patternNames)).flatMap((value, index) => index ? ["", value] : [value]),
     "",
     ...ir.channels.flatMap((channel, index) => index ? ["", emitOperationMetadata(channel), "", emitChannel(channel)] : [emitOperationMetadata(channel), "", emitChannel(channel)]),
     "",

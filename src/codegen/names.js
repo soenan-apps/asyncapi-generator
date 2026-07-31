@@ -91,6 +91,22 @@ export function dartTypeName(value) {
     : identifier;
 }
 
+export function sourceCommentLiteral(value) {
+  return JSON.stringify(String(value)).replace(
+    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
+    character => {
+      const codePoint = character.codePointAt(0);
+      if (codePoint <= 0xFFFF) {
+        return `\\u${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+      }
+      const offset = codePoint - 0x10000;
+      const high = 0xD800 + (offset >> 10);
+      const low = 0xDC00 + (offset & 0x3FF);
+      return `\\u${high.toString(16).toUpperCase()}\\u${low.toString(16).toUpperCase()}`;
+    }
+  );
+}
+
 export function swiftStringLiteral(value) {
   let result = '"';
   for (const character of String(value)) {

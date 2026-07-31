@@ -217,6 +217,23 @@ test("unsupported validation semantics fail instead of being dropped", async () 
   assert.ok((await diagnosticsFor(duplexDocument({ clientPayload: openPayload }))).some(value => value.code === "schema.additional-properties.open-unsupported"));
 });
 
+test("unsafe regular-expression shapes fail before source emission", async () => {
+  const payload = {
+    type: "object",
+    additionalProperties: false,
+    required: ["type", "value"],
+    properties: {
+      type: { const: "client" },
+      value: { type: "string", pattern: "^(a+)+$" }
+    }
+  };
+  const diagnostics = await diagnosticsFor(duplexDocument({ clientPayload: payload }));
+  assert.deepEqual(
+    diagnostics.filter(value => value.code === "schema.pattern.unsafe").map(value => value.path),
+    ["/operations/receiveEvent/messages/0/payload/properties/value/pattern"]
+  );
+});
+
 test("integer formats have explicit cross-language bounds", async () => {
   const int32Payload = {
     type: "object",

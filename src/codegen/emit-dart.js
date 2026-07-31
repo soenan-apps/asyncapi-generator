@@ -1,4 +1,9 @@
-import { dartIdentifier, dartStringLiteral, dartTypeName } from "./names.js";
+import {
+  dartIdentifier,
+  dartStringLiteral,
+  dartTypeName,
+  sourceCommentLiteral
+} from "./names.js";
 
 const joinLines = items => items.filter(value => value !== undefined && value !== "").join("\n");
 const literal = value => value === undefined ? "null" : String(value);
@@ -106,16 +111,16 @@ ${encoded.join("\n")}
 }`;
 }
 
-function schemaExpression(schema) {
+function schemaExpression(schema, patternNames) {
   let kind;
   let extras = "";
   switch (schema.kind) {
     case "object":
       kind = "_AsyncApiSchemaKind.object";
-      extras = `, properties: <String, _AsyncApiField>{${schema.properties.map(property => `${quoted(property.wireName)}: _AsyncApiField(${property.required}, ${schemaExpression(property.schema)})`).join(", ")}}, additionalProperties: ${schema.additionalProperties}`;
+      extras = `, properties: <String, _AsyncApiField>{${schema.properties.map(property => `${quoted(property.wireName)}: _AsyncApiField(${property.required}, ${schemaExpression(property.schema, patternNames)})`).join(", ")}}, additionalProperties: ${schema.additionalProperties}`;
       break;
-    case "array": kind = "_AsyncApiSchemaKind.array"; extras = `, items: ${schemaExpression(schema.items)}`; break;
-    case "map": kind = "_AsyncApiSchemaKind.map"; extras = `, values: ${schemaExpression(schema.values)}`; break;
+    case "array": kind = "_AsyncApiSchemaKind.array"; extras = `, items: ${schemaExpression(schema.items, patternNames)}`; break;
+    case "map": kind = "_AsyncApiSchemaKind.map"; extras = `, values: ${schemaExpression(schema.values, patternNames)}`; break;
     case "enum": kind = "_AsyncApiSchemaKind.string"; extras = `, allowed: <String>{${schema.values.map(quoted).join(", ")}}`; break;
     case "string": kind = "_AsyncApiSchemaKind.string"; break;
     case "integer": kind = "_AsyncApiSchemaKind.integer"; break;
@@ -123,11 +128,19 @@ function schemaExpression(schema) {
     case "boolean": kind = "_AsyncApiSchemaKind.boolean"; break;
     default: throw new TypeError(`unknown schema kind ${schema.kind}`);
   }
-  return `_AsyncApiSchema(${kind}, nullable: ${schema.nullable}, minimum: ${literal(schema.minimum)}, maximum: ${literal(schema.maximum)}, exclusiveMinimum: ${literal(schema.exclusiveMinimum)}, exclusiveMaximum: ${literal(schema.exclusiveMaximum)}, minLength: ${literal(schema.minLength)}, maxLength: ${literal(schema.maxLength)}, pattern: ${schema.pattern === undefined ? "null" : quoted(schema.pattern)}, minItems: ${literal(schema.minItems)}, maxItems: ${literal(schema.maxItems)}${extras})`;
+  return `_AsyncApiSchema(${kind}, nullable: ${schema.nullable}, minimum: ${literal(schema.minimum)}, maximum: ${literal(schema.maximum)}, exclusiveMinimum: ${literal(schema.exclusiveMinimum)}, exclusiveMaximum: ${literal(schema.exclusiveMaximum)}, minLength: ${literal(schema.minLength)}, maxLength: ${literal(schema.maxLength)}, pattern: ${schema.pattern === undefined ? "null" : `_AsyncApiPatternRegistry.${patternNames.get(schema.pattern)}`}, minItems: ${literal(schema.minItems)}, maxItems: ${literal(schema.maxItems)}${extras})`;
 }
 
-function emitStrictRuntime() {
-  return `enum _AsyncApiSchemaKind { object, array, map, string, integer, number, boolean }
+function emitStrictRuntime(patterns) {
+  return `final class _AsyncApiPattern {
+  _AsyncApiPattern(String source) : expression = RegExp(source, unicode: true);
+  final RegExp expression;
+
+  bool matches(String value) => expression.hasMatch(value);
+}
+
+${patterns.length === 0 ? "" : `abstract final class _AsyncApiPatternRegistry {\n${patterns.map((pattern, index) => `  static final p${index} = _AsyncApiPattern(${quoted(pattern)});`).join("\n")}\n}\n`}
+enum _AsyncApiSchemaKind { object, array, map, string, integer, number, boolean }
 
 final class _AsyncApiField {
   const _AsyncApiField(this.required, this.schema);
@@ -163,7 +176,7 @@ final class _AsyncApiSchema {
   final num? exclusiveMaximum;
   final int? minLength;
   final int? maxLength;
-  final String? pattern;
+  final _AsyncApiPattern? pattern;
   final int? minItems;
   final int? maxItems;
   final Map<String, _AsyncApiField>? properties;
@@ -219,7 +232,8 @@ abstract final class _AsyncApiStrictJson {
         final allowed = schema.allowed;
         if (minimumLength != null && length < minimumLength) throw FormatException('string is shorter than minLength at $path');
         if (maximumLength != null && length > maximumLength) throw FormatException('string is longer than maxLength at $path');
-        if (pattern != null && !RegExp(pattern).hasMatch(value)) throw FormatException('string does not match pattern at $path');
+        if (pattern != null && length > 4096) throw FormatException('string exceeds pattern input budget at $path');
+        if (pattern != null && !pattern.matches(value)) throw FormatException('string does not match pattern at $path');
         if (allowed != null && !allowed.contains(value)) throw FormatException('unknown enum or const value at $path');
         return;
       case _AsyncApiSchemaKind.integer:
@@ -253,11 +267,11 @@ extension _FirstOrNull<T> on Iterable<T> {
 }`;
 }
 
-function emitMessageCodec(message) {
+function emitMessageCodec(message, patternNames) {
   const messageType = dartTypeName(message.typeName);
   return `final class ${messageType}Codec {
   const ${messageType}Codec();
-  static final _schema = ${schemaExpression(message.schema)};
+  static final _schema = ${schemaExpression(message.schema, patternNames)};
 
   ${messageType} decode(Uint8List bytes) {
     final value = _AsyncApiStrictJson.decode(bytes);
@@ -422,9 +436,10 @@ ${ir.closeSignals.map(signal => `  static const ${dartIdentifier(signal.name)} =
 
 export function emitDart(ir) {
   const schemas = ir.schemas.map(schema => schema.kind === "enum" ? emitEnum(schema) : emitObject(schema));
+  const patternNames = new Map(ir.patterns.map((pattern, index) => [pattern, `p${index}`]));
   return `${joinLines([
     "// Generated by @soenan/asyncapi-generator. Do not edit.",
-    `// Source: ${ir.title} ${ir.version}`,
+    `// Source: ${sourceCommentLiteral(ir.title)} ${sourceCommentLiteral(ir.version)}`,
     "// ignore_for_file: unused_element_parameter",
     "",
     "import 'dart:async';",
@@ -433,11 +448,11 @@ export function emitDart(ir) {
     "",
     emitPublicRuntime(ir),
     "",
-    emitStrictRuntime(),
+    emitStrictRuntime(ir.patterns),
     "",
     ...schemas.flatMap((value, index) => index ? ["", value] : [value]),
     "",
-    ...ir.messages.map(emitMessageCodec).flatMap((value, index) => index ? ["", value] : [value]),
+    ...ir.messages.map(message => emitMessageCodec(message, patternNames)).flatMap((value, index) => index ? ["", value] : [value]),
     "",
     ...ir.channels.flatMap((channel, index) => index ? ["", emitChannel(channel)] : [emitChannel(channel)]),
     "",

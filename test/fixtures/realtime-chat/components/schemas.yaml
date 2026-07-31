@@ -38,6 +38,9 @@ postMessagePayload:
       type: object
       additionalProperties:
         type: string
+    projectReference:
+      type: string
+      pattern: ^prj_[0-9a-f]{32}$
 setTypingPayload:
   type: object
   additionalProperties: false

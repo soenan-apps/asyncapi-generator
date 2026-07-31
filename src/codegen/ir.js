@@ -1,5 +1,6 @@
 import { GeneratorDiagnostic, UnsupportedAsyncAPIFeaturesError } from "./diagnostics.js";
 import { camelCase, dartIdentifier, dartTypeName, pascalCase, swiftIdentifier, swiftTypeName } from "./names.js";
+import { normalizeSafePattern, UnsafePatternError } from "./pattern-policy.js";
 
 const CLOSE_SIGNAL_EXTENSION = "x-websocket-close-signals";
 const COMPOSITION_ACCESSORS = ["allOf", "anyOf", "oneOf", "not", "if", "then", "else"];
@@ -61,6 +62,7 @@ class IRBuilder {
     this.diagnostics = [];
     this.namedSchemas = new Map();
     this.messages = new Map();
+    this.patterns = new Set();
   }
 
   diagnostic(code, path, message) {
@@ -89,6 +91,7 @@ class IRBuilder {
       channels: channels.filter(Boolean),
       messages: [...this.messages.values()].map(value => value.message).sort((left, right) => left.typeName.localeCompare(right.typeName)),
       schemas: [...this.namedSchemas.values()].map(value => value.schema).sort((left, right) => left.name.localeCompare(right.name)),
+      patterns: [...this.patterns].sort(),
       closeSignals
     };
   }
@@ -488,6 +491,16 @@ class IRBuilder {
         );
       }
     }
+    let pattern;
+    if (schema.pattern() !== undefined) {
+      try {
+        pattern = normalizeSafePattern(schema.pattern());
+        this.patterns.add(pattern);
+      } catch (error) {
+        if (!(error instanceof UnsafePatternError)) throw error;
+        this.diagnostic("schema.pattern.unsafe", path + "/pattern", error.message);
+      }
+    }
     return {
       nullable,
       minimum,
@@ -496,7 +509,7 @@ class IRBuilder {
       exclusiveMaximum: schema.exclusiveMaximum(),
       minLength: schema.minLength(),
       maxLength: schema.maxLength(),
-      pattern: schema.pattern(),
+      pattern,
       minItems: schema.minItems(),
       maxItems: schema.maxItems()
     };

@@ -141,6 +141,8 @@ The current generator supports:
   messages.
 - Closed fixed-property objects, typed maps, arrays, string enums, strings,
   bounded integers, numbers, booleans, and nullable types.
+- String patterns in the portable, bounded regular-expression subset described
+  under Security and limitations.
 - `int32` as Swift `Int32` and bounded `int64` as Swift `Int64`.
 - WebSocket close signals declared with the
   `x-websocket-close-signals` root extension.
@@ -236,8 +238,26 @@ are rejected because the generator cannot enforce them.
 
 Run the generator only on trusted local contracts and references. Do not place
 secrets in contracts or generator configs; file paths and diagnostics can be
-reported in local and CI logs. Remote `$ref` documents are outside the supported
-contract; use trusted local files.
+reported in local and CI logs. Remote and authority-bearing `$ref` documents are
+rejected before resolution. Local references, including resolved symlinks, must
+remain within the input contract's directory.
+
+String `pattern` validation is deliberately narrower than arbitrary
+ECMAScript regular expressions. Patterns are limited to 256 UTF-8 bytes,
+literals, anchors, dot, character classes, portable character categories,
+fixed repetition up to 256, and at most one variable repetition. Groups,
+alternation, lookarounds, backreferences, multiple variable repetitions, and
+other engine-specific constructs fail generation with
+`schema.pattern.unsafe`. The generator normalizes `\s`, `\d`, and `\w` before
+emission so Foundation and Dart use the same character sets and absolute end
+semantics. Each unique accepted pattern is compiled once in a generated static
+registry, and patterned input is rejected above 4,096 Unicode code points
+before regular-expression evaluation.
+
+The differential pattern corpus keeps both hand-written boundary vectors and a
+fixed derived operation trace. Swift and Dart stock generated codecs execute
+the same trace and assert exact verdicts plus deterministic compilation and
+validation operation counts; wall-clock timing is not an acceptance oracle.
 
 Report suspected vulnerabilities privately through
 [GitHub Security Advisories](https://github.com/soenan-apps/asyncapi-generator/security/advisories/new).

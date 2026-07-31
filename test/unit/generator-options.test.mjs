@@ -1,12 +1,64 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
-import { assertSupportedNodeVersion, validateConfig } from "../../src/generator.mjs";
+import {
+  assertLocalReferences,
+  assertSupportedNodeVersion,
+  validateConfig
+} from "../../src/generator.mjs";
 
 test("Node support is explicit and checked before parsing input", () => {
   assert.doesNotThrow(() => assertSupportedNodeVersion("24.11.1"));
   assert.throws(() => assertSupportedNodeVersion("24.3.0"), /requires Node\.js >=24\.11\.1 <25/);
   assert.throws(() => assertSupportedNodeVersion("25.0.0"), /requires Node\.js >=24\.11\.1 <25/);
+});
+
+test("reference preflight rejects every remote or authority-bearing form without disclosing its value", () => {
+  for (const reference of [
+    "https://example.invalid/schema.yaml",
+    " HTTP://example.invalid/schema.yaml",
+    "//example.invalid/schema.yaml",
+    "\\\\example.invalid\\schema.yaml",
+    "ftp://example.invalid/schema.yaml",
+    "git+ssh://example.invalid/schema.yaml",
+    "file://example.invalid/schema.yaml",
+    "file:relative/schema.yaml",
+    "file:////example.invalid/schema.yaml"
+  ]) {
+    assert.throws(
+      () => assertLocalReferences(`components:\n  schemas:\n    Unsafe:\n      $ref: ${JSON.stringify(reference)}\n`),
+      error => {
+        assert.equal(error.name, "UnsupportedAsyncAPIFeaturesError");
+        assert.equal(error.diagnostics.length, 1);
+        assert.equal(error.diagnostics[0].code, "reference.remote");
+        assert.equal(error.diagnostics[0].path, "$/components/schemas/Unsafe/$ref");
+        assert.equal(error.message.includes(reference.trim()), false);
+        return true;
+      }
+    );
+  }
+});
+
+test("reference preflight preserves local files, fragments, and Windows drive paths", () => {
+  for (const reference of [
+    "#/components/schemas/Message",
+    "./schemas/message.yaml#/Message",
+    "../schemas/message.yaml#/Message",
+    "/opt/contracts/message.yaml#/Message",
+    "C:\\contracts\\message.yaml#/Message",
+    "file:/opt/contracts/message.yaml#/Message",
+    "file:///opt/contracts/message.yaml#/Message",
+    "file:///C:/contracts/message.yaml#/Message"
+  ]) {
+    assert.doesNotThrow(() => assertLocalReferences(`$ref: ${JSON.stringify(reference)}\n`));
+  }
+});
+
+test("reference preflight fails closed when YAML cannot be inspected safely", () => {
+  assert.throws(
+    () => assertLocalReferences("components: ["),
+    /reference preflight could not parse the input safely/
+  );
 });
 
 test("config paths resolve relative to the config file", () => {

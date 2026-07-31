@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "seed": 3235823838,
+  "arbitraryOperationCount": 512,
+  "metrics": {
+    "patternCompilations": 2,
+    "patternValidationOperations": 531,
+    "codecValidationOperations": 542
+  },
+  "patterns": [
+    {
+      "id": "non-whitespace-prefix",
+      "field": "text",
+      "source": "^[^\\s].*",
+      "origin": "generator realtime-chat fixture"
+    },
+    {
+      "id": "audaligo-project-id",
+      "field": "projectReference",
+      "source": "^prj_[0-9a-f]{32}$",
+      "origin": "audaligo/contracts/asyncapi/audaligo-chat.json"
+    }
+  ],
+  "boundaryVectors": [
+    {"id":"text-ascii","pattern":"non-whitespace-prefix","field":"text","input":"Hello","expected":true},
+    {"id":"text-empty","pattern":"non-whitespace-prefix","field":"text","input":"","expected":false},
+    {"id":"text-leading-space","pattern":"non-whitespace-prefix","field":"text","input":" leading","expected":false},
+    {"id":"text-leading-tab","pattern":"non-whitespace-prefix","field":"text","input":"\tleading","expected":false},
+    {"id":"text-leading-newline","pattern":"non-whitespace-prefix","field":"text","input":"\nleading","expected":false},
+    {"id":"text-leading-no-break-space","pattern":"non-whitespace-prefix","field":"text","input":" leading","expected":false},
+    {"id":"text-leading-line-separator","pattern":"non-whitespace-prefix","field":"text","input":" leading","expected":false},
+    {"id":"text-unicode","pattern":"non-whitespace-prefix","field":"text","input":"日本語😀","expected":true},
+    {"id":"text-control-after-prefix","pattern":"non-whitespace-prefix","field":"text","input":"a\u0000b","expected":true},
+    {"id":"text-max-length","pattern":"non-whitespace-prefix","field":"text","input":{"value":"a","count":128},"expected":true},
+    {"id":"text-over-max-length","pattern":"non-whitespace-prefix","field":"text","input":{"value":"a","count":129},"expected":false},
+    {"id":"project-valid-lowercase","pattern":"audaligo-project-id","field":"projectReference","input":"prj_0123456789abcdef0123456789abcdef","expected":true},
+    {"id":"project-uppercase","pattern":"audaligo-project-id","field":"projectReference","input":"prj_0123456789ABCDEF0123456789ABCDEF","expected":false},
+    {"id":"project-short","pattern":"audaligo-project-id","field":"projectReference","input":"prj_0123456789abcdef","expected":false},
+    {"id":"project-long","pattern":"audaligo-project-id","field":"projectReference","input":"prj_0123456789abcdef0123456789abcdef0","expected":false},
+    {"id":"project-prefix-boundary","pattern":"audaligo-project-id","field":"projectReference","input":"xprj_0123456789abcdef0123456789abcdef","expected":false},
+    {"id":"project-newline-suffix","pattern":"audaligo-project-id","field":"projectReference","input":"prj_0123456789abcdef0123456789abcdef\n","expected":false},
+    {"id":"project-input-budget","pattern":"audaligo-project-id","field":"projectReference","input":{"value":"a","count":4096},"expected":false},
+    {"id":"project-over-input-budget","pattern":"audaligo-project-id","field":"projectReference","input":{"value":"a","count":4097},"expected":false}
+  ],
+  "traceSamples": [
+    {"step":0,"id":"text-ascii","field":"text","pattern":"non-whitespace-prefix","input":"Hello","expected":true},
+    {"step":1,"id":"text-empty","field":"text","pattern":"non-whitespace-prefix","input":"","expected":false},
+    {"step":2,"id":"text-leading-space","field":"text","pattern":"non-whitespace-prefix","input":" leading","expected":false},
+    {"step":3,"id":"text-leading-tab","field":"text","pattern":"non-whitespace-prefix","input":"\tleading","expected":false},
+    {"step":4,"id":"text-leading-newline","field":"text","pattern":"non-whitespace-prefix","input":"\nleading","expected":false},
+    {"step":5,"id":"text-leading-no-break-space","field":"text","pattern":"non-whitespace-prefix","input":" leading","expected":false},
+    {"step":6,"id":"text-leading-line-separator","field":"text","pattern":"non-whitespace-prefix","input":" leading","expected":false},
+    {"step":7,"id":"text-unicode","field":"text","pattern":"non-whitespace-prefix","input":"日本語😀","expected":true},
+    {"step":8,"id":"text-control-after-prefix","field":"text","pattern":"non-whitespace-prefix","input":"a\u0000b","expected":true},
+    {"step":9,"id":"text-max-length","field":"text","pattern":"non-whitespace-prefix","input":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected":true},
+    {"step":10,"id":"text-over-max-length","field":"text","pattern":"non-whitespace-prefix","input":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected":false},
+    {"step":11,"id":"project-valid-lowercase","field":"projectReference","pattern":"audaligo-project-id","input":"prj_0123456789abcdef0123456789abcdef","expected":true},
+    {"step":12,"id":"project-uppercase","field":"projectReference","pattern":"audaligo-project-id","input":"prj_0123456789ABCDEF0123456789ABCDEF","expected":false},
+    {"step":13,"id":"project-short","field":"projectReference","pattern":"audaligo-project-id","input":"prj_0123456789abcdef","expected":false},
+    {"step":14,"id":"project-long","field":"projectReference","pattern":"audaligo-project-id","input":"prj_0123456789abcdef0123456789abcdef0","expected":false},
+    {"step":15,"id":"project-prefix-boundary","field":"projectReference","pattern":"audaligo-project-id","input":"xprj_0123456789abcdef0123456789abcdef","expected":false},
+    {"step":16,"id":"project-newline-suffix","field":"projectReference","pattern":"audaligo-project-id","input":"prj_0123456789abcdef0123456789abcdef\n","expected":false},
+    {"step":19,"id":"arbitrary-0","field":"text","pattern":"non-whitespace-prefix","input":"9 \n😀日a- f\u0000 -a\n\ra9a日😀9f_\r9f0日0a\n  ","expected":true},
+    {"step":20,"id":"arbitrary-1","field":"projectReference","pattern":"audaligo-project-id","input":"9f 0\u0000😀_ __\na  - \n\t","expected":false},
+    {"step":21,"id":"arbitrary-2","field":"projectReference","pattern":"audaligo-project-id","input":"日f- a f😀\u0000\u0000\u0000 \u0000日 - \t😀 \n\n a99 _9\u0000 \u0000 日 a_😀\n\r\nf-  \rf \r😀0\n 0\r日\u0000a00 9 日日a日 ff 😀  \t😀\na\t 0日9😀 日a f😀a\t\raaa 日","expected":false},
+    {"step":22,"id":"arbitrary-3","field":"text","pattern":"non-whitespace-prefix","input":"  f -😀\n 9a f afa 0\ra ","expected":false},
+    {"step":23,"id":"arbitrary-4","field":"text","pattern":"non-whitespace-prefix","input":"_ \t\rf0\r\u0000 \r-\ra\r0 日f _\u0000 \n\n 日__0a \rf a 😀 \n_\n日9  日_0\t09__ \t \n日-9ff_ff\r日a f","expected":true}
+  ],
+  "traceSha256": "616b6d62ee33fbb4202754df4a4b168b2477e665f53a390ea052529630852fc3"
+}
