@@ -1,0 +1,59 @@
+{
+  "asyncapi": "3.1.0",
+  "info": {
+    "title": "Keyword and escaping fixture",
+    "version": "1.0.0"
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "self": {
+      "address": "/keyword/{class}",
+      "parameters": {
+        "class": {
+          "description": "A keyword parameter"
+        }
+      },
+      "messages": {
+        "any": {
+          "name": "Any",
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "class", "display-name", "cash$value"],
+            "properties": {
+              "type": {"const": "client.\"send\""},
+              "class": {"type": "string"},
+              "display-name": {"type": "string"},
+              "cash$value": {"type": "string"},
+              "mode": {"type": "string", "enum": ["class", "switch"]}
+            }
+          }
+        },
+        "function": {
+          "name": "Function",
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "result"],
+            "properties": {
+              "type": {"const": "server\\result"},
+              "result": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    }
+  },
+  "operations": {
+    "receiveClass": {
+      "action": "receive",
+      "channel": {"$ref": "#/channels/self"},
+      "messages": [{"$ref": "#/channels/self/messages/any"}]
+    },
+    "sendFunction": {
+      "action": "send",
+      "channel": {"$ref": "#/channels/self"},
+      "messages": [{"$ref": "#/channels/self/messages/function"}]
+    }
+  }
+}

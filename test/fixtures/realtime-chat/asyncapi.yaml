@@ -1,0 +1,45 @@
+asyncapi: 3.1.0
+info:
+  title: Realtime chat example
+  version: 1.0.0
+defaultContentType: application/json
+x-soenan-websocket-close-signals:
+  authenticationExpired:
+    code: 4401
+    reason: Authentication expired
+  roomUnavailable:
+    code: 4404
+    reason: Room is no longer available
+channels:
+  roomChat:
+    address: /realtime/rooms/{roomId}/chat
+    parameters:
+      roomId:
+        description: Stable room identifier.
+    messages:
+      postMessage:
+        $ref: ./components/messages.yaml#/postMessage
+      setTyping:
+        $ref: ./components/messages.yaml#/setTyping
+      messagePosted:
+        $ref: ./components/messages.yaml#/messagePosted
+      typingUpdated:
+        $ref: ./components/messages.yaml#/typingUpdated
+      messageRejected:
+        $ref: ./components/messages.yaml#/messageRejected
+operations:
+  receiveChatCommand:
+    action: receive
+    channel:
+      $ref: '#/channels/roomChat'
+    messages:
+      - $ref: '#/channels/roomChat/messages/postMessage'
+      - $ref: '#/channels/roomChat/messages/setTyping'
+  sendChatEvent:
+    action: send
+    channel:
+      $ref: '#/channels/roomChat'
+    messages:
+      - $ref: '#/channels/roomChat/messages/messagePosted'
+      - $ref: '#/channels/roomChat/messages/typingUpdated'
+      - $ref: '#/channels/roomChat/messages/messageRejected'

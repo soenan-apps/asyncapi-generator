@@ -1,0 +1,25 @@
+postMessage:
+  name: PostMessage
+  title: Post a chat message
+  payload:
+    $ref: ./schemas.yaml#/postMessagePayload
+setTyping:
+  name: SetTyping
+  title: Set the local typing state
+  payload:
+    $ref: ./schemas.yaml#/setTypingPayload
+messagePosted:
+  name: MessagePosted
+  title: Deliver a posted chat message
+  payload:
+    $ref: ./schemas.yaml#/messagePostedPayload
+typingUpdated:
+  name: TypingUpdated
+  title: Deliver a participant's typing state
+  payload:
+    $ref: ./schemas.yaml#/typingUpdatedPayload
+messageRejected:
+  name: MessageRejected
+  title: Explain why a client message was rejected
+  payload:
+    $ref: ./schemas.yaml#/messageRejectedPayload
