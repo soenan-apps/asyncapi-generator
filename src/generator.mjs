@@ -1,6 +1,5 @@
 import { constants as fsConstants } from "node:fs";
 import {
-  access,
   mkdir,
   open,
   readFile,
@@ -410,7 +409,6 @@ export function assertSupportedNodeVersion(version = process.versions.node) {
 }
 
 async function assertInputFile(input) {
-  await access(input, fsConstants.R_OK);
   const metadata = await stat(input);
   if (!metadata.isFile()) throw new TypeError(`Input is not a file: ${input}`);
 }

@@ -132,11 +132,11 @@ class IRBuilder {
       return undefined;
     }
     const addressSegments = address.split("/").slice(1);
-    if ((address !== "/" && addressSegments.some(segment => {
+    if (address !== "/" && addressSegments.some(segment => {
       if (segment.length === 0 || segment === "." || segment === "..") return true;
       if (/^\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(segment)) return false;
       return !/^[A-Za-z0-9._~-]+$/.test(segment);
-    })) || address.includes("?") || address.includes("#")) {
+    })) {
       this.diagnostic(
         "channel.address",
         `${path}/address`,
@@ -614,5 +614,3 @@ export function buildIR(asyncapi, options) {
   if (!options?.moduleName || typeof options.moduleName !== "string") throw new TypeError("moduleName is required");
   return new IRBuilder(asyncapi, options.moduleName).build();
 }
-
-export { CLOSE_SIGNAL_EXTENSION, isValidCloseCode };

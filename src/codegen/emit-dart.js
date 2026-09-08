@@ -200,8 +200,9 @@ abstract final class _AsyncApiStrictJson {
         final object = Map<String, Object?>.from(value);
         final properties = schema.properties!;
         if (!schema.additionalProperties) {
-          final unknown = object.keys.where((key) => !properties.containsKey(key)).firstOrNull;
-          if (unknown != null) throw FormatException('unknown property at $path.$unknown');
+          for (final key in object.keys) {
+            if (!properties.containsKey(key)) throw FormatException('unknown property at $path.$key');
+          }
         }
         for (final MapEntry(key: name, value: field) in properties.entries) {
           if (!object.containsKey(name)) {
@@ -260,10 +261,6 @@ abstract final class _AsyncApiStrictJson {
     if (exclusiveMinimum != null && value <= exclusiveMinimum) throw FormatException('number is below exclusiveMinimum at $path');
     if (exclusiveMaximum != null && value >= exclusiveMaximum) throw FormatException('number is above exclusiveMaximum at $path');
   }
-}
-
-extension _FirstOrNull<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }`;
 }
 
