@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import test from "node:test";
 import { buildIR } from "../../src/codegen/ir.js";
+import { emitDart } from "../../src/codegen/emit-dart.js";
+import { emitSwift } from "../../src/codegen/emit-swift.js";
 import { duplexDocument, parseFile, parseObject } from "../support/parse.mjs";
 
 const realtimeChatFixture = resolve("test/fixtures/realtime-chat/asyncapi.yaml");
@@ -152,6 +154,48 @@ test("unidirectional contracts fail with a stable diagnostic", async () => {
   const document = duplexDocument();
   delete document.operations.sendEvent;
   assert.ok((await diagnosticsFor(document)).some(value => value.code === "channel.duplex.required"));
+});
+
+test("HTTPS SSE contracts generate one-way server message codecs", async () => {
+  const document = duplexDocument();
+  delete document.operations.receiveEvent;
+  document["x-server-sent-events"] = {
+    contentType: "text/event-stream",
+    dataContentType: "application/json",
+    event: "message",
+    heartbeat: "comment"
+  };
+  document.servers = {
+    realtime: { host: "example.com", protocol: "https" }
+  };
+  document.operations.sendEvent.bindings = {
+    http: {
+      method: "GET",
+      query: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          projectId: { type: "string" },
+          after: { type: "integer", minimum: 0, maximum: 9007199254740991 }
+        }
+      },
+      bindingVersion: "0.3.0"
+    }
+  };
+  const ir = buildIR(await parseObject(document), { moduleName: "EventsAPI" });
+  assert.equal(ir.transport, "sse");
+  assert.equal(ir.channels[0].incoming, undefined);
+  assert.deepEqual(
+    ir.channels[0].outgoing.cases.map(value => value.message.id),
+    ["server"]
+  );
+  assert.deepEqual(ir.closeSignals, []);
+  const swift = emitSwift(ir);
+  const dart = emitDart(ir);
+  assert.match(swift, /public enum EventsServerMessageCodec/);
+  assert.doesNotMatch(swift, /AsyncAPIRuntime|ServerSession|WebSocket/);
+  assert.match(dart, /abstract final class EventsServerMessageCodec/);
+  assert.doesNotMatch(dart, /SocketAdapter|ClientSession|WebSocket/);
 });
 
 test("enum cases that collide in generated languages fail before emission", async () => {

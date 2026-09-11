@@ -3,6 +3,7 @@ import { camelCase, dartIdentifier, dartTypeName, pascalCase, swiftIdentifier, s
 import { normalizeSafePattern, UnsafePatternError } from "./pattern-policy.js";
 
 const CLOSE_SIGNAL_EXTENSION = "x-websocket-close-signals";
+const SSE_EXTENSION = "x-server-sent-events";
 const COMPOSITION_ACCESSORS = ["allOf", "anyOf", "oneOf", "not", "if", "then", "else"];
 const UNSUPPORTED_VALIDATION_KEYWORDS = [
   "contains", "contentEncoding", "contentMediaType", "contentSchema",
@@ -74,10 +75,10 @@ class IRBuilder {
       this.diagnostic("asyncapi.version", "$.asyncapi", `expected 3.1.0, received ${JSON.stringify(this.asyncapi.version())}`);
     }
 
-    this.validateServers();
-    const channels = sortedModels(this.asyncapi.channels()).map(channel => this.buildChannel(channel));
+    const transport = this.validateServers();
+    const channels = sortedModels(this.asyncapi.channels()).map(channel => this.buildChannel(channel, transport));
     this.assertUniqueNames(channels.filter(Boolean), "channel", "$.channels");
-    const closeSignals = this.buildCloseSignals();
+    const closeSignals = this.buildCloseSignals(transport);
     this.assertLanguageTypeNames(
       [...this.namedSchemas.values()].map(value => ({ id: value.path, value: value.schema.name })),
       "$.schemas"
@@ -92,25 +93,60 @@ class IRBuilder {
       messages: [...this.messages.values()].map(value => value.message).sort((left, right) => left.typeName.localeCompare(right.typeName)),
       schemas: [...this.namedSchemas.values()].map(value => value.schema).sort((left, right) => left.name.localeCompare(right.name)),
       patterns: [...this.patterns].sort(),
-      closeSignals
+      closeSignals,
+      transport
     };
   }
 
   validateServers() {
+    const protocols = new Set();
     for (const serverModel of sortedModels(this.asyncapi.servers())) {
       const id = serverModel.id();
       const path = modelPath(serverModel, `$.servers.${id}`);
-      const protocol = serverModel.protocol();
-      if (protocol !== "ws" && protocol !== "wss") {
-        this.diagnostic(
-          "server.protocol.unsupported",
-          `${path}/protocol`,
-          `generated transports require ws or wss, received ${JSON.stringify(protocol)}`
-        );
-      }
+      protocols.add(serverModel.protocol());
       this.rejectBindings(serverModel, "server", path);
       if (serverModel.security().length > 0) {
         this.diagnostic("server.security.unsupported", `${path}/security`, "server security requirements are not generated yet");
+      }
+    }
+    const extension = this.rawDocument[SSE_EXTENSION];
+    const transport = extension === undefined ? "websocket" : "sse";
+    const allowed = transport === "sse" ? new Set(["http", "https"]) : new Set(["ws", "wss"]);
+    for (const protocol of protocols) {
+      if (!allowed.has(protocol)) {
+        this.diagnostic(
+          "server.protocol.unsupported",
+          "$.servers",
+          `${transport} contracts require ${[...allowed].join(" or ")}, received ${JSON.stringify(protocol)}`
+        );
+      }
+    }
+    if (transport === "sse") this.validateSSEExtension(extension);
+    return transport;
+  }
+
+  validateSSEExtension(extension) {
+    const path = `$.${SSE_EXTENSION}`;
+    const expected = {
+      contentType: "text/event-stream",
+      dataContentType: "application/json",
+      event: "message",
+      heartbeat: "comment"
+    };
+    if (!extension || typeof extension !== "object" || Array.isArray(extension)) {
+      this.diagnostic("sse.shape", path, "expected an SSE framing object");
+      return;
+    }
+    for (const [key, value] of Object.entries(extension)) {
+      if (!Object.hasOwn(expected, key)) {
+        this.diagnostic("sse.property.unsupported", `${path}.${key}`, `unsupported SSE property ${JSON.stringify(key)}`);
+      } else if (value !== expected[key]) {
+        this.diagnostic("sse.value", `${path}.${key}`, `expected ${JSON.stringify(expected[key])}`);
+      }
+    }
+    for (const [key, value] of Object.entries(expected)) {
+      if (extension[key] === undefined) {
+        this.diagnostic("sse.property.required", `${path}.${key}`, `expected ${JSON.stringify(value)}`);
       }
     }
   }
@@ -122,7 +158,7 @@ class IRBuilder {
     }
   }
 
-  buildChannel(channelModel) {
+  buildChannel(channelModel, transport) {
     const id = channelModel.id();
     const path = modelPath(channelModel, `$.channels.${id}`);
     const address = channelModel.address();
@@ -154,7 +190,7 @@ class IRBuilder {
     }
 
     const operations = sortedModels(channelModel.operations())
-      .map(operation => this.buildOperation(operation, path))
+      .map(operation => this.buildOperation(operation, path, transport))
       .filter(Boolean);
     if (operations.length === 0) {
       this.diagnostic("channel.operations", path, "at least one operation is required");
@@ -163,11 +199,18 @@ class IRBuilder {
 
     const incomingOperations = operations.filter(operation => operation.action === "receive");
     const outgoingOperations = operations.filter(operation => operation.action === "send");
-    if (incomingOperations.length === 0 || outgoingOperations.length === 0) {
-      this.diagnostic("channel.duplex.required", path, "generated sessions require at least one send and one receive operation");
+    if (transport === "websocket" && (incomingOperations.length === 0 || outgoingOperations.length === 0)) {
+      this.diagnostic("channel.duplex.required", path, "generated WebSocket sessions require at least one send and one receive operation");
     }
-    const incoming = this.buildDirectionUnion(id, "ClientMessage", incomingOperations, `${path}/operations`);
-    const outgoing = this.buildDirectionUnion(id, "ServerMessage", outgoingOperations, `${path}/operations`);
+    if (transport === "sse" && (incomingOperations.length !== 0 || outgoingOperations.length === 0)) {
+      this.diagnostic("channel.sse.direction", path, "SSE channels require one or more send operations and no receive operations");
+    }
+    const incoming = incomingOperations.length
+      ? this.buildDirectionUnion(id, "ClientMessage", incomingOperations, `${path}/operations`)
+      : undefined;
+    const outgoing = outgoingOperations.length
+      ? this.buildDirectionUnion(id, "ServerMessage", outgoingOperations, `${path}/operations`)
+      : undefined;
 
     return {
       id,
@@ -177,7 +220,8 @@ class IRBuilder {
       parameterNames: addressParameters,
       operations,
       incoming,
-      outgoing
+      outgoing,
+      transport
     };
   }
 
@@ -199,10 +243,14 @@ class IRBuilder {
     }
   }
 
-  buildOperation(operationModel, channelPath) {
+  buildOperation(operationModel, channelPath, transport) {
     const id = operationModel.id();
     const path = modelPath(operationModel, `${channelPath}/operations/${id}`);
-    this.rejectBindings(operationModel, "operation", path);
+    if (transport === "sse") {
+      this.validateSSEOperationBinding(operationModel, path);
+    } else {
+      this.rejectBindings(operationModel, "operation", path);
+    }
     if (operationModel.security().length > 0) {
       this.diagnostic("operation.security.unsupported", `${path}/security`, "operation security requirements are not generated yet");
     }
@@ -224,6 +272,29 @@ class IRBuilder {
     }
     const messages = messageModels.map(message => this.buildMessage(message)).filter(Boolean);
     return { id, name: camelCase(id), typeName: pascalCase(id), action, messages };
+  }
+
+  validateSSEOperationBinding(operationModel, path) {
+    const raw = this.rawDocument.operations?.[operationModel.id()]?.bindings;
+    const http = raw?.http;
+    if (!http || typeof http !== "object" || Array.isArray(http)) {
+      this.diagnostic("operation.sse.http-binding", `${path}/bindings/http`, "SSE operations require an HTTP binding");
+      return;
+    }
+    for (const key of Object.keys(http)) {
+      if (!["method", "query", "bindingVersion"].includes(key)) {
+        this.diagnostic("operation.sse.http-property", `${path}/bindings/http/${key}`, `unsupported HTTP binding property ${JSON.stringify(key)}`);
+      }
+    }
+    if (http.method !== "GET") {
+      this.diagnostic("operation.sse.http-method", `${path}/bindings/http/method`, "SSE operations require GET");
+    }
+    if (http.bindingVersion !== "0.3.0") {
+      this.diagnostic("operation.sse.http-version", `${path}/bindings/http/bindingVersion`, "SSE operations require HTTP binding 0.3.0");
+    }
+    if (!http.query || http.query.type !== "object" || http.query.additionalProperties !== false) {
+      this.diagnostic("operation.sse.http-query", `${path}/bindings/http/query`, "SSE query parameters require a closed object schema");
+    }
   }
 
   buildMessage(messageModel) {
@@ -525,12 +596,16 @@ class IRBuilder {
     this.namedSchemas.set(schema.name, { fingerprint: valueFingerprint, schema, path });
   }
 
-  buildCloseSignals() {
+  buildCloseSignals(transport) {
     if (this.rawDocument.components?.[CLOSE_SIGNAL_EXTENSION] !== undefined) {
       this.diagnostic("close-signals.location", `$.components.${CLOSE_SIGNAL_EXTENSION}`, `move ${CLOSE_SIGNAL_EXTENSION} to the document root`);
     }
     const extension = this.rawDocument[CLOSE_SIGNAL_EXTENSION];
     if (extension === undefined) return [];
+    if (transport !== "websocket") {
+      this.diagnostic("close-signals.transport", `$.${CLOSE_SIGNAL_EXTENSION}`, "WebSocket close signals are invalid for SSE contracts");
+      return [];
+    }
     if (!extension || typeof extension !== "object" || Array.isArray(extension)) {
       this.diagnostic("close-signals.shape", `$.${CLOSE_SIGNAL_EXTENSION}`, "expected a map of signal names to code and reason");
       return [];
