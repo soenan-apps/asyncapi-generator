@@ -1,9 +1,10 @@
 # AsyncAPI Swift and Dart Generator
 
-`@soenan/asyncapi-generator` turns one AsyncAPI 3.1 WebSocket contract into
-compile-ready Swift server types and Dart client types. Both outputs come from
-the same validated intermediate model, so a backend and frontend do not need
-separate handwritten message, operation, or path contracts.
+`@soenan/asyncapi-generator` turns an AsyncAPI 3.1 contract into compile-ready
+Swift server types and Dart client types. Duplex WebSocket contracts generate
+typed sessions and adapters. HTTP Server-Sent Events contracts generate
+one-way message unions and public codecs without pretending the stream is a
+socket. Both outputs come from the same validated intermediate model.
 
 The generator intentionally supports a narrow contract surface. It rejects
 wire semantics that it cannot preserve instead of producing plausible but
@@ -135,8 +136,11 @@ The current generator supports:
 
 - AsyncAPI `3.1.0` documents in YAML or JSON, including local file references.
 - Duplex WebSocket channels with `ws` or `wss` servers.
+- One-way Server-Sent Events channels with `http` or `https` servers, the
+  `x-server-sent-events` framing declaration, and an HTTP 0.3.0 `GET` operation
+  binding with a closed query schema.
 - Whole-segment `{parameterName}` string path parameters.
-- One or more JSON messages for each send or receive operation.
+- One or more JSON messages for each declared operation.
 - A shared required string `const` discriminator when a direction has multiple
   messages.
 - Closed fixed-property objects, typed maps, arrays, string enums, strings,
@@ -145,7 +149,7 @@ The current generator supports:
   under Security and limitations.
 - `int32` as Swift `Int32` and bounded `int64` as Swift `Int64`.
 - WebSocket close signals declared with the
-  `x-websocket-close-signals` root extension.
+  `x-websocket-close-signals` root extension for WebSocket contracts only.
 
 Channel literal segments use ASCII URI-unreserved characters only. Empty,
 `.`, `..`, percent-encoded, Unicode, colon, and backslash segments are rejected.
@@ -153,10 +157,11 @@ Every integer must fit Dart Web's exact JSON integer range.
 
 The generator rejects unsupported schema composition, dynamic properties,
 tuple arrays, unknown formats or validation keywords, non-JSON payloads,
-headers, replies, bindings, security requirements, traits, correlation IDs,
-parameter validation, ambiguous discriminators, and unidirectional channels.
-Titles, descriptions, tags, examples, and external documentation remain valid
-annotations when they do not change wire behavior.
+headers, replies, unsupported bindings, security requirements, traits,
+correlation IDs, path-parameter validation, ambiguous discriminators, and
+unsupported transport directions. Titles, descriptions, tags, examples, and
+external documentation remain valid annotations when they do not change wire
+behavior.
 
 ## Generated output
 
@@ -166,15 +171,17 @@ listed by the previous manifest; unrelated files are not deleted.
 
 Swift output is written to
 `Sources/<ModuleName>/AsyncAPIGenerated.swift`. It includes Codable models,
-strict JSON codecs, typed direction unions, operation metadata, channel
-registration, close signals, and a server session. A channel's
-`<Channel>IncomingMessages` is a lazy `AsyncSequence`: each iterator `next()`
-pulls and decodes one transport message without adding another inbound buffer.
+strict JSON codecs, typed direction unions, operation metadata, and channel
+metadata. WebSocket contracts additionally include channel registration, close
+signals, and a server session. An SSE server-message union codec is public and
+accepts or returns raw JSON `Data`.
 
 Dart output provides `lib/<module_name>.dart` as the public library and keeps
 implementation code in `lib/src/asyncapi_generated.dart`. It includes models,
-strict codecs, typed sessions, operation metadata, close signals, and the
-`AsyncApiSocketAdapter` interface used to open a connection.
+strict codecs, typed message unions, operation metadata, and channel metadata.
+WebSocket contracts additionally include typed sessions, close signals, and the
+`AsyncApiSocketAdapter`. An SSE server-message union codec is public and accepts
+or returns `Uint8List`.
 
 Generated code is deterministic for the same generator version, config, and
 contract. Commit generated output when consumers must build without running
@@ -182,9 +189,10 @@ Node.js, and run `check` in CI to detect drift.
 
 ## Swift runtime relationship
 
-Swift output imports `AsyncAPIRuntime` from the separate
+Generated WebSocket Swift output imports `AsyncAPIRuntime` from the separate
 [`swift-asyncapi-runtime`](https://github.com/soenan-apps/swift-asyncapi-runtime)
-package. The generator does not copy or discover a local runtime checkout.
+package. SSE output has no transport-runtime dependency. The generator does not
+copy or discover a local runtime checkout.
 Consumers should pin an exact runtime release compatible with their generator
 version.
 
